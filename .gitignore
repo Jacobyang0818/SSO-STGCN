@@ -1,2 +1,32 @@
-dataset_info.npz
-dataset_info_modified.npz
+# Environments
+colab_env_310/
+venv/
+env/
+.env
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Results and logs
+results/
+runs/
+*.log
+sso_result/
+pso_result/
+GA_tri/
+pred_results/
+test_output.log
+error.log
+
+# Models
+pretrained/
+
+# IDEs
+.idea/
+.vscode/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/

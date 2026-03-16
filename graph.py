@@ -83,7 +83,7 @@ class Graph:
         self.nx_node = nx_node
 
         assert nx_node == 1 or mode == 'random', "nx_node can be > 1 only if mode is 'random'"
-        assert layout in ['openpose', 'nturgb+d', 'coco', 'handmp']
+        assert layout in ['openpose', 'nturgb+d', 'coco', 'handmp', 'ucla', 'yolo', 'kinetics']
 
         self.get_layout(layout)
         self.hop_dis = get_hop_distance(self.num_node, self.inward, max_hop)
@@ -113,7 +113,7 @@ class Graph:
             ]
             self.inward = [(i - 1, j - 1) for (i, j) in neighbor_base]
             self.center = 21 - 1
-        elif layout == 'coco':
+        elif layout == 'coco' or layout == 'yolo':
             self.num_node = 17
             self.inward = [
                 (15, 13), (13, 11), (16, 14), (14, 12), (11, 5), (12, 6),
@@ -121,6 +121,20 @@ class Graph:
                 (1, 0), (3, 1), (2, 0), (4, 2)
             ]
             self.center = 0
+        
+        elif layout == 'ucla':
+            self.num_node = 20
+            self.inward = [
+                (1, 2), (2, 3), (4, 3), (5, 3), (6, 5), (7, 6), (8, 7),
+                (9, 3), (10, 9), (11, 10), (12, 11), (13, 1), (14, 13), (15, 14),
+                (16, 15), (17, 1), (18, 17), (19, 18), (20, 19)
+            ]
+            self.center = 3
+
+            # 轉換 1-based 索引為 0-based 索引
+            self.inward = [(i - 1, j - 1) for i, j in self.inward]
+            self.center = self.center-1
+
         elif layout == 'handmp':
             self.num_node = 21
             self.inward = [
@@ -129,6 +143,38 @@ class Graph:
                 (15, 14), (16, 15), (17, 0), (18, 17), (19, 18), (20, 19)
             ]
             self.center = 0
+
+        # selected_joints = {
+        #     0: 0,   # Nose -> Nose
+        #     1: 1,   # Neck -> Neck
+        #     2: 2,   # RShoulder -> RShoulder
+        #     3: 3,   # RElbow -> RElbow
+        #     4: 4,   # RWrist -> RWrist
+        #     5: 5,   # LShoulder -> LShoulder
+        #     6: 6,   # LElbow -> LElbow
+        #     7: 7,   # LWrist -> LWrist
+        #     8: 9,   # RHip -> RHip
+        #     9: 10,  # RKnee -> RKnee
+        #     10: 11, # RAnkle -> RAnkle
+        #     11: 12, # LHip -> LHip
+        #     12: 13, # LKnee -> LKnee
+        #     13: 14, # LAnkle -> LAnkle
+        #     14: 15, # REye -> REye
+        #     15: 16, # LEye -> LEye
+        #     16: 17, # REar -> REar
+        #     17: 18, # LEar -> LEar
+        #     18: 8,  # MidHip, MidHip
+        # }
+
+        elif layout == 'kinetics':
+            self.num_node = 19
+            self_link = [(i, i) for i in range(self.num_node)]
+            self.inward = [(0, 1), (2, 1), (3, 2), (4, 3), (5, 1), (6, 5), (7, 6), (8, 18), (9, 8), (10, 9), 
+                            (11, 18), (12, 11), (13, 12), (14, 0), (15, 0), (16, 4), (17, 15),(1, 18)]
+            self.outward = [(j, i) for (i, j) in self.inward]
+            self.neighbor = self.inward + self.outward
+            self.center = 0
+
         else:
             raise ValueError(f'Do Not Exist This Layout: {layout}')
         self.self_link = [(i, i) for i in range(self.num_node)]

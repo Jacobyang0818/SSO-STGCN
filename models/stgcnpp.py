@@ -2,9 +2,9 @@ import copy as cp
 import torch
 import torch.nn as nn
 # from mmcv.runner import load_checkpoint
-from ..graph import Graph
+from graph import Graph
 # from pyskl.utils import Graph, cache_checkpoint
-from ..gcns import mstcn, unit_gcn, unit_tcn, GCNHead
+from gcns import mstcn, unit_gcn, unit_tcn, GCNHead
 from torch.nn.init import xavier_uniform_
 EPS = 1e-4
 
@@ -16,6 +16,7 @@ class STGCNBlock(nn.Module):
                  A,
                  stride=1,
                  residual=True,
+                 act = 0,
                  **kwargs):
         super().__init__()
 
@@ -35,7 +36,15 @@ class STGCNBlock(nn.Module):
             self.tcn = unit_tcn(out_channels, out_channels, 9, stride=stride, **tcn_kwargs)
         elif tcn_type == 'mstcn':
             self.tcn = mstcn(out_channels, out_channels, stride=stride, **tcn_kwargs)
-        self.relu = nn.ReLU()
+        
+        if act == 0:
+            self.act = nn.ReLU()
+        elif act == 1:
+            self.act = nn.ReLU6()
+        elif act == 2:
+            self.act = nn.Hardshrink()
+        elif act == 3:
+            self.act = nn.SiLU()
 
         if not residual:
             self.residual = lambda x: 0
@@ -48,7 +57,7 @@ class STGCNBlock(nn.Module):
         """Defines the computation performed at every call."""
         res = self.residual(x)
         x = self.tcn(self.gcn(x, A)) + res
-        return self.relu(x)
+        return self.act(x)
     
 
 class STGCN(nn.Module):
@@ -66,6 +75,7 @@ class STGCN(nn.Module):
                 pretrained=None,
                 num_classes=4,
                 head_dropout=0,
+                act = 0,
                 **kwargs):
         
         super().__init__()
@@ -98,7 +108,7 @@ class STGCN(nn.Module):
 
         modules = []
         if self.in_channels != self.base_channels:
-            modules = [STGCNBlock(in_channels, base_channels, A.clone(), 1, residual=False, **lw_kwargs[0])]
+            modules = [STGCNBlock(in_channels, base_channels, A.clone(), 1, act=act, residual=False, **lw_kwargs[0])]
 
         inflate_times = 0
         for i in range(2, num_stages + 1):
@@ -108,7 +118,7 @@ class STGCN(nn.Module):
                 inflate_times += 1   # 5 -> inflate_times = 1;    8->inflate_times = 2
             out_channels = int(self.base_channels * self.ch_ratio ** inflate_times + EPS)
             base_channels = out_channels
-            modules.append(STGCNBlock(in_channels, out_channels, A.clone(), stride, **lw_kwargs[i - 1]))
+            modules.append(STGCNBlock(in_channels, out_channels, A.clone(), stride, act=act, **lw_kwargs[i - 1]))
 
         if self.in_channels == self.base_channels:
             num_stages -= 1
@@ -122,6 +132,9 @@ class STGCN(nn.Module):
             in_channels=base_channels,
             dropout=head_dropout,
         )
+
+        self._init_weights()
+        
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv1d):

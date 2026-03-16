@@ -325,8 +325,8 @@ class SkateFormerStage(nn.Module):
 
 
 class SkateFormer(nn.Module):
-    def __init__(self, in_channels=3, depths=(2, 2, 2, 2), channels=(96, 192, 192, 192), num_classes=60,
-                 embed_dim=64, num_people=2, num_frames=64, num_points=50, kernel_size=7, num_heads=32,
+    def __init__(self, in_channels=2, depths=(2, 2, 2, 2), channels=(96, 192, 192, 192), num_classes=60,
+                 embed_dim=96, num_people=2, num_frames=64, num_points=50, kernel_size=7, num_heads=32,
                  type_1_size=(1, 1), type_2_size=(1, 1), type_3_size=(1, 1), type_4_size=(1, 1),
                  attn_drop=0., head_drop=0., drop=0., rel=True, drop_path=0., mlp_ratio=4.,
                  act_layer=nn.GELU, norm_layer_transformer=nn.LayerNorm, index_t=False, global_pool='avg'):
@@ -434,8 +434,7 @@ class SkateFormer(nn.Module):
         return self.head(input), input  #score, embedding
     # def forward(self, input, index_t):
     def forward(self, input):
-        if (len(input.size()) == 6):
-            input = input.squeeze(1)
+
         N, M, T, V, C = input.size()
         input = input.permute(0, 4, 2, 3, 1).contiguous()
         B, C, T, V, M = input.size()
@@ -448,8 +447,9 @@ class SkateFormer(nn.Module):
             div_term = torch.exp(
                 (torch.arange(0, self.embed_dim, 2, dtype=torch.float) * -(math.log(10000.0) / self.embed_dim))).to(
                 output.device)
-            te[:, :, 0::2] = torch.sin(self.index_t.unsqueeze(-1).float() * div_term)
-            te[:, :, 1::2] = torch.cos(self.index_t.unsqueeze(-1).float() * div_term)
+            index_t_tensor = torch.arange(T, dtype=torch.float, device=output.device)  # 修正這裡
+            te[:, :, 0::2] = torch.sin(index_t_tensor.unsqueeze(-1).float() * div_term)
+            te[:, :, 1::2] = torch.cos(index_t_tensor.unsqueeze(-1).float() * div_term)
             output = output + torch.einsum('b t c, c v -> b c t v', te, self.joint_person_embedding)
         else:
             output = output + self.joint_person_temporal_embedding
@@ -458,10 +458,10 @@ class SkateFormer(nn.Module):
         return score, embedding
 
 
-def SkateFormer_(**kwargs):
-    return SkateFormer(
-        depths=(2, 2, 2, 2),
-        channels=(96, 192, 192, 192),
-        embed_dim=96,
-        **kwargs
-    )
+# def SkateFormer_(**kwargs):
+#     return SkateFormer(
+#         depths=(2, 2, 2, 2),
+#         channels=(96, 192, 192, 192),
+#         embed_dim=96,
+#         **kwargs
+#     )

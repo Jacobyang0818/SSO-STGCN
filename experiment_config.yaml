@@ -1,0 +1,61 @@
+# 基因演算法/社會蜘蛛/粒子群 最佳化設定參數設定檔
+# 根據論文表 3-4-1 修改邊界值
+
+experiment:
+  # 演算法選擇： SSO, GA, 或 PSO
+  algorithm: "SSO"
+  
+  # 最佳化方向： minimize 或 maximize（預設最小化 val_acc 的負值）
+  direction: "minimize"
+  
+  # 迭代代數與解數量
+  Ngen: 30
+  Nsol: 10
+  
+  # 存檔名稱前綴
+  save_name: "drunk_sso_nas"
+
+# 固定訓練參數（不會由演算法搜尋的參數）
+fixed_args:
+  data: "drunk"
+  split: 1
+  epochs: 80
+  batch: 16
+  patient: 15
+  mt: true
+  model: "stgcn"          # 選用 STGCN++ 進行 NAS
+
+# 參考表 3-4-1 的解碼定義與範圍
+# 格式規範：
+# - [min, max] 整數：產生範圍內隨機整數 (適用維度、層數)
+# - [min.0, max.0] 浮點數：產生範圍內隨機浮點數 (適用學習率、機率)
+# - [[v1, v2, v3, ...]]：從特定列表中隨機選擇 (注意雙層方括號表示列表選擇)
+boundary:
+  num_init:     [1, 4]             # x1: 初始流 ST-GCN 模組數量 (離散整數)
+  base_channel: [64, 256]          # x2: 初始流 ST-GCN 輸出維度 (離散整數)
+  stride_init:  [1, 3]             # x3: 初始流下採樣模組步長 (離散整數)
+  tkernel_init: [[3, 5, 7]]        # x4: 初始流時間卷積核大小 (離散列表)
+  act:          [[0, 1, 2, 3]]     # x5: 激勵函數 [0:ReLu, 1:SiLu, 2:Relu6, 3:Hardswish]
+  opt:          [[0, 1, 2]]        # x6: 優化器 [0:SGD, 1:Adam, 2:AdamW]
+  dropout_bk:   [0.15, 0.3]        # x7: ST-GCN 模組丟棄率 (連續)
+  dropout_fc:   [0.15, 0.3]        # x8: 全連接層丟棄率 (連續)
+  lr:           [0.001, 0.1]       # x9: 優化器之學習率 (連續)
+  weight_decay: [0.0, 0.01]        # x10: 優化器之權重遞減 (連續)
+  momentum:     [0.5, 0.99]        # x11: 優化器之動量 (連續)
+  margin:       [0.2, 1.0]         # x12: m，三元組損失的邊際值 (連續)
+  lambda_val:   [0.0, 0.90]        # x13: lambda，三元組損失之比例係數 (連續)
+
+# 演算法特定的超參數 (只對應的演算法生效)
+sso_params:
+  Cg: 0.7
+  Cp: 0.8
+  Cw: 0.9
+
+ga_params:
+  crossover_rate: 0.9
+  mutation_rate: 0.1
+
+pso_params:
+  w: 0.7
+  c1: 0.8
+  c2: 0.9

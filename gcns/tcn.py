@@ -71,11 +71,19 @@ class mstcn(nn.Module):
                 branches.append(nn.Conv2d(in_channels, branch_c, kernel_size=1, stride=(stride, 1)))
                 continue
             assert isinstance(cfg, tuple)
+            # if cfg[0] == 'max':
+            #     branches.append(
+            #         nn.Sequential(
+            #             nn.Conv2d(in_channels, branch_c, kernel_size=1), nn.BatchNorm2d(branch_c), self.act,
+            #             nn.MaxPool2d(kernel_size=(cfg[1], 1), stride=(stride, 1), padding=(1, 0))))
+            #     continue
+            
+            # 修改 padding讓每個分支的T維度相同
             if cfg[0] == 'max':
                 branches.append(
                     nn.Sequential(
                         nn.Conv2d(in_channels, branch_c, kernel_size=1), nn.BatchNorm2d(branch_c), self.act,
-                        nn.MaxPool2d(kernel_size=(cfg[1], 1), stride=(stride, 1), padding=(1, 0))))
+                        nn.MaxPool2d(kernel_size=(cfg[1], 1), stride=(stride, 1), padding=((cfg[1]-1)//2, 0))))
                 continue
             assert isinstance(cfg[0], int) and isinstance(cfg[1], int)
             branch = nn.Sequential(

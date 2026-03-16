@@ -1,12 +1,11 @@
 import copy as cp
 import torch
 import torch.nn as nn
-from mmcv.runner import load_checkpoint
+# from mmcv.runner import load_checkpoint
 
-from pyskl.utils import Graph, cache_checkpoint
+from graph import Graph
+from gcns import dgmstcn, dggcn, unit_tcn, GCNHead
 
-from pyskl.models.gcns.utils import dggcn, dgmstcn, unit_tcn
-from pyskl.models.heads import GCNHead
 EPS = 1e-4
 
 
@@ -25,7 +24,7 @@ class DGBlock(nn.Module):
         gcn_kwargs = {k[4:]: v for k, v in kwargs.items() if k[:4] == 'gcn_'}
         tcn_kwargs = {k[4:]: v for k, v in kwargs.items() if k[:4] == 'tcn_'}
         kwargs = {k: v for k, v in kwargs.items() if k[1:4] != 'cn_'}
-        assert len(kwargs) == 0
+        assert len(kwargs) == 0, f'Invalid arguments: {kwargs}'
 
         self.gcn = dggcn(in_channels, out_channels, A, **gcn_kwargs)
         self.tcn = dgmstcn(out_channels, out_channels, stride=stride, **tcn_kwargs)
@@ -61,6 +60,7 @@ class DGSTGCN(nn.Module):
                  num_person=2,
                  pretrained=None,
                  num_classes = 4,
+                 head_dropout=0,
                  **kwargs):
         super().__init__()
 
@@ -116,12 +116,8 @@ class DGSTGCN(nn.Module):
         self.head = GCNHead(
             num_classes=num_classes,
             in_channels=base_channels,
+            dropout=head_dropout,
         )
-
-    def init_weights(self):
-        if isinstance(self.pretrained, str):
-            self.pretrained = cache_checkpoint(self.pretrained)
-            load_checkpoint(self, self.pretrained, strict=False)
 
     def forward(self, x):
         if (len(x.size()) == 6):
@@ -139,5 +135,5 @@ class DGSTGCN(nn.Module):
 
         x = x.reshape((N, M) + x.shape[1:])
         
-        x = self.head(x)
-        return x
+        x, embedding = self.head(x)
+        return x, embedding

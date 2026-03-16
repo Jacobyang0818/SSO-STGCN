@@ -1,0 +1,36 @@
+# 專為測試運行 1 個 epoch 而建的短暫配置檔
+experiment:
+  algorithm: "SSO"
+  direction: "minimize"
+  Ngen: 1
+  Nsol: 1
+  save_name: "test_run_sso"
+
+fixed_args:
+  data: "drunk"
+  split: 1
+  epochs: 1
+  batch: 8
+  patient: 15
+  mt: true
+  model: "stgcn"
+
+boundary:
+  num_init:     [1, 2]
+  base_channel: [64, 128]
+  stride_init:  [1, 2]
+  tkernel_init: [[3, 5]]
+  act:          [[0, 1]]
+  opt:          [[0, 1]]
+  dropout_bk:   [0.15, 0.2]
+  dropout_fc:   [0.15, 0.2]
+  lr:           [0.01, 0.05]
+  weight_decay: [0.0, 0.005]
+  momentum:     [0.8, 0.9]
+  margin:       [0.5, 0.8]
+  lambda_val:   [0.3, 0.7]
+
+sso_params:
+  Cg: 0.7
+  Cp: 0.8
+  Cw: 0.9

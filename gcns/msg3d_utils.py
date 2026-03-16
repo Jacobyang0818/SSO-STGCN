@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from .act import build_activation_layer
 # from mmcv.utils import _BatchNorm
-from ...graph import k_adjacency, normalize_digraph
+from ..graph import k_adjacency, normalize_digraph
 from .init_func import bn_init, conv_init
 from .tcn import unit_tcn
 

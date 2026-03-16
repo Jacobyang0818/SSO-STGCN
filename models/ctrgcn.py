@@ -5,8 +5,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from pyskl.utils import Graph, cache_checkpoint
-EPS = 1e-4
+from gcns import GCNHead
+from graph import Graph
+
 def import_class(name):
     components = name.split('.')
     mod = __import__(components[0])
@@ -32,9 +33,14 @@ def conv_init(conv):
 
 
 def bn_init(bn, scale):
+    # print(f"bn.weight shape: {bn.weight.shape}")  # 檢查維度
+    # print(f"bn.bias shape: {bn.bias.shape}")
+    
+    if bn.weight.numel() == 0 or bn.bias.numel() == 0:
+        raise ValueError("BatchNorm has zero-element tensors!")
+
     nn.init.constant_(bn.weight, scale)
     nn.init.constant_(bn.bias, 0)
-
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -157,8 +163,8 @@ class CTRGC(nn.Module):
             self.rel_channels = 8
             self.mid_channels = 16
         else:
-            self.rel_channels = in_channels // rel_reduction
-            self.mid_channels = in_channels // mid_reduction
+            self.rel_channels = max(1, in_channels // rel_reduction)
+            self.mid_channels = max(1, in_channels // mid_reduction)
         self.conv1 = nn.Conv2d(self.in_channels, self.rel_channels, kernel_size=1)
         self.conv2 = nn.Conv2d(self.in_channels, self.rel_channels, kernel_size=1)
         self.conv3 = nn.Conv2d(self.in_channels, self.out_channels, kernel_size=1)
@@ -218,9 +224,10 @@ class unit_gcn(nn.Module):
         else:
             self.down = lambda x: 0
         if self.adaptive:
-            self.PA = nn.Parameter(A.to(dtype=torch.float32))
+            self.PA = nn.Parameter(A.clone().detach().float())  # ✅ 避免不必要的 tensor 轉換
         else:
-            self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
+            self.register_buffer("A", A.clone().detach().float())  # ✅ 確保 `A` 不會被 optimizer 訓練
+
         self.alpha = nn.Parameter(torch.zeros(1))
         self.bn = nn.BatchNorm2d(out_channels)
         self.soft = nn.Softmax(-2)
@@ -251,16 +258,12 @@ class unit_gcn(nn.Module):
 
 
 class TCN_GCN_unit(nn.Module):
-    def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True, kernel_size=5, dilations=[1,2], tcn_dropout=0):
+    def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True, kernel_size=5, dilations=[1,2]):
         super(TCN_GCN_unit, self).__init__()
         self.gcn1 = unit_gcn(in_channels, out_channels, A, adaptive=adaptive)
         self.tcn1 = MultiScale_TemporalConv(out_channels, out_channels, kernel_size=kernel_size, stride=stride, dilations=dilations,
                                             residual=False)
         self.relu = nn.ReLU(inplace=True)
-        if tcn_dropout:
-            self.dropout = nn.Dropout(tcn_dropout)
-        else:
-            self.dropout = nn.Dropout(0)
         if not residual:
             self.residual = lambda x: 0
 
@@ -271,95 +274,75 @@ class TCN_GCN_unit(nn.Module):
             self.residual = unit_tcn(in_channels, out_channels, kernel_size=1, stride=stride)
 
     def forward(self, x):
-        y = self.relu(self.dropout(self.tcn1(self.gcn1(x))) + self.residual(x))
+        y = self.relu(self.tcn1(self.gcn1(x)) + self.residual(x))
         return y
 
 
 class CTRGCN(nn.Module):
-    def __init__(self, graph_cfg, num_classes=60, num_point=17, num_person=1, in_channels=3,
-                  head_dropout=0, adaptive=True, base_channels=64, ch_ratio=2, num_stages=10,
-                  inflate_stages=[5, 8], down_stages=[5, 8], pretrained=None, tcn_dropout = 0, gcn_with_res = True):
-        super().__init__()
+    def __init__(self, num_classes=60, num_point=25, num_person=2, graph_cfg=None,  in_channels=2,
+                 drop_out=0, adaptive=True):
+        super(CTRGCN, self).__init__()
 
         self.graph = Graph(**graph_cfg)
         A = torch.tensor(self.graph.A, dtype=torch.float32, requires_grad=False)
-
-        self.num_class = num_classes
+        self.register_buffer('A', A)
+        
+        # print("Graph adjacency matrix A shape:", A.shape)
+        if A.numel() == 0:
+            raise ValueError("Graph adjacency matrix A is empty!")
+        
+        self.num_classes = num_classes
         self.num_point = num_point
         self.data_bn = nn.BatchNorm1d(num_person * in_channels * num_point)
-        self.in_channels = in_channels
-        self.base_channels = base_channels
-        self.ch_ratio = ch_ratio
 
-        modules = []
-        if self.in_channels != self.base_channels:
-            modules = [TCN_GCN_unit(in_channels, base_channels, A, residual=False, adaptive=adaptive)]
+        base_channel = 64
+        self.l1 = TCN_GCN_unit(in_channels, base_channel, A, residual=False, adaptive=adaptive)
+        self.l2 = TCN_GCN_unit(base_channel, base_channel, A, adaptive=adaptive)
+        self.l3 = TCN_GCN_unit(base_channel, base_channel, A, adaptive=adaptive)
+        self.l4 = TCN_GCN_unit(base_channel, base_channel, A, adaptive=adaptive)
+        self.l5 = TCN_GCN_unit(base_channel, base_channel*2, A, stride=2, adaptive=adaptive)
+        self.l6 = TCN_GCN_unit(base_channel*2, base_channel*2, A, adaptive=adaptive)
+        self.l7 = TCN_GCN_unit(base_channel*2, base_channel*2, A, adaptive=adaptive)
+        self.l8 = TCN_GCN_unit(base_channel*2, base_channel*4, A, stride=2, adaptive=adaptive)
+        self.l9 = TCN_GCN_unit(base_channel*4, base_channel*4, A, adaptive=adaptive)
+        self.l10 = TCN_GCN_unit(base_channel*4, base_channel*4, A, adaptive=adaptive)
 
-        inflate_times = 0
-        for i in range(2, num_stages + 1):
-            stride = 1 + (i in down_stages)  # 透過 stride 控制下採樣
-            in_channels = base_channels # input channel = 上一層的output channel
-            if i in inflate_stages:  # 確定當前在需要放大通道數的層數
-                inflate_times += 1   # 5 -> inlate_times = 1;    8->inflate_times = 2
-            out_channels = int(self.base_channels * self.ch_ratio ** inflate_times + EPS)
-            base_channels = out_channels
-            modules.append(TCN_GCN_unit(in_channels, base_channels, A, stride=stride, residual = gcn_with_res ,adaptive=adaptive, tcn_dropout=tcn_dropout))
+        self.head = GCNHead(
+            num_classes=self.num_classes,
+            in_channels=base_channel*4,
+            dropout=0,
+        )
 
-        if self.in_channels == self.base_channels:
-            num_stages -= 1
-
-        self.num_stages = num_stages
-        self.gcn = nn.ModuleList(modules)
-        self.pretrained = pretrained
-
-        # self.l1 = TCN_GCN_unit(in_channels, base_channel, A, residual=False, adaptive=adaptive)
-        # self.l2 = TCN_GCN_unit(base_channel, base_channel, A, adaptive=adaptive)
-        # self.l3 = TCN_GCN_unit(base_channel, base_channel, A, adaptive=adaptive)
-        # self.l4 = TCN_GCN_unit(base_channel, base_channel, A, adaptive=adaptive)
-        # self.l5 = TCN_GCN_unit(base_channel, base_channel*2, A, stride=2, adaptive=adaptive)
-        # self.l6 = TCN_GCN_unit(base_channel*2, base_channel*2, A, adaptive=adaptive)
-        # self.l7 = TCN_GCN_unit(base_channel*2, base_channel*2, A, adaptive=adaptive)
-        # self.l8 = TCN_GCN_unit(base_channel*2, base_channel*4, A, stride=2, adaptive=adaptive)
-        # self.l9 = TCN_GCN_unit(base_channel*4, base_channel*4, A, adaptive=adaptive)
-        # self.l10 = TCN_GCN_unit(base_channel*4, base_channel*4, A, adaptive=adaptive)
-
-        self.fc = nn.Linear(base_channels, num_classes)
-        nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / num_classes))
         bn_init(self.data_bn, 1)
-        if head_dropout:
-            self.drop_out = nn.Dropout(head_dropout)
+        if drop_out:
+            self.drop_out = nn.Dropout(drop_out)
         else:
             self.drop_out = lambda x: x
 
     def forward(self, x):
+        # print("x.shape original:", x.shape)
+
         if (len(x.size()) == 6):
-            x = x.squeeze(1) # N M T V C
-            x = x.permute(0, 4, 2, 3, 1).contiguous() # NCTVM
+            x = x.squeeze(1)
+        N, M, T, V, C = x.size()
+        x = x.permute(0, 4, 2, 3, 1).contiguous()
+
         N, C, T, V, M = x.size()
 
-        # N, M, T, V, C = x.size()
-        # if len(x.shape) == 3:
-        #     N, T, VC = x.shape
-        #     x = x.view(N, T, self.num_point, -1).permute(0, 3, 1, 2).contiguous().unsqueeze(-1)
-        # N, C, T, V, M = x.size()
-
         x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
+        # print("x.shape before BatchNorm:", x.shape)
         x = self.data_bn(x)
         x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
-
-        for i in range(self.num_stages):
-            x = self.gcn[i](x)
-
-        # x = self.l1(x)
-        # x = self.l2(x)
-        # x = self.l3(x)
-        # x = self.l4(x)
-        # x = self.l5(x)
-        # x = self.l6(x)
-        # x = self.l7(x)
-        # x = self.l8(x)
-        # x = self.l9(x)
-        # x = self.l10(x)
+        x = self.l1(x)
+        x = self.l2(x)
+        x = self.l3(x)
+        x = self.l4(x)
+        x = self.l5(x)
+        x = self.l6(x)
+        x = self.l7(x)
+        x = self.l8(x)
+        x = self.l9(x)
+        x = self.l10(x)
 
         # N*M,C,T,V
         c_new = x.size(1)
@@ -367,4 +350,6 @@ class CTRGCN(nn.Module):
         x = x.mean(3).mean(1)
         x = self.drop_out(x)
 
-        return self.fc(x)
+        x, embedding = self.head(x)
+
+        return x, embedding
